@@ -23,7 +23,7 @@ type SavedEpisodePage struct {
 }
 
 type SavedEpisode struct {
-	// The date and time the show was saved, represented as an ISO
+	// The date and time the episodeshow was saved, represented as an ISO
 	// 8601 UTC timestamp with a zero offset (YYYY-MM-DDTHH:MM:SSZ).
 	// You can use the TimestampLayout constant to convert this to
 	// a time.Time value.
@@ -62,4 +62,12 @@ func (c *Client) CurrentUsersEpisodes(ctx context.Context, opts ...RequestOption
 	}
 
 	return &result, nil
+}
+
+func (c *Client) RemoveCurrentUsersEpisodes(ctx context.Context, ids ...ID) error {
+	return c.modifyLibrary(ctx, "episodes", false, ids...)
+}
+
+func (c *Client) RemoveCurrentUsersShows(ctx context.Context, ids ...ID) error {
+	return c.modifyLibrary(ctx, "shows", false, ids...)
 }
