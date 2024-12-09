@@ -20,17 +20,17 @@ type cursorPage struct {
 	Endpoint string `json:"href"`
 	// The maximum number of items returned, as set in the query
 	// (or default value if unset).
-	Limit int `json:"limit"`
+	Limit Numeric `json:"limit"`
 	// The URL to the next set of items.
 	Next string `json:"next"`
 	// The total number of items available to return.
-	Total int `json:"total"`
+	Total Numeric `json:"total"`
 	// The cursor used to find the next set of items.
 	Cursor Cursor `json:"cursors"`
 }
 
 // FullArtistCursorPage is a cursor-based paging object containing
-// a set of FullArtist objects.
+// a set of [FullArtist] objects.
 type FullArtistCursorPage struct {
 	cursorPage
 	Artists []FullArtist `json:"items"`

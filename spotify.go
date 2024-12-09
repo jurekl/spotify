@@ -9,16 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 	"time"
 
 	"golang.org/x/oauth2"
 )
-
-// Version is the version of this library.
-const Version = "1.0.0"
 
 const (
 	// DateLayout can be used with time.Parse to create time.Time values
@@ -34,10 +30,6 @@ const (
 	// defaultRetryDurationS helps us fix an apparent server bug whereby we will
 	// be told to retry but not be given a wait-interval.
 	defaultRetryDuration = time.Second * 5
-
-	// rateLimitExceededStatusCode is the code that the server returns when our
-	// request frequency is too high.
-	rateLimitExceededStatusCode = 429
 )
 
 // Client is a client for working with the Spotify Web API.
@@ -102,11 +94,24 @@ func (id *ID) String() string {
 	return string(*id)
 }
 
+// Numeric is a convenience type for handling numbers sent as either integers or floats.
+type Numeric int
+
+// UnmarshalJSON unmarshals a JSON number (float or int) into the Numeric type.
+func (n *Numeric) UnmarshalJSON(data []byte) error {
+	var f float64
+	if err := json.Unmarshal(data, &f); err != nil {
+		return err
+	}
+	*n = Numeric(int(f))
+	return nil
+}
+
 // Followers contains information about the number of people following a
 // particular artist or playlist.
 type Followers struct {
 	// The total number of followers.
-	Count uint `json:"total"`
+	Count Numeric `json:"total"`
 	// A link to the Web API endpoint providing full details of the followers,
 	// or the empty string if this data is not available.
 	Endpoint string `json:"href"`
@@ -115,9 +120,9 @@ type Followers struct {
 // Image identifies an image associated with an item.
 type Image struct {
 	// The image height, in pixels.
-	Height int `json:"height"`
+	Height Numeric `json:"height"`
 	// The image width, in pixels.
-	Width int `json:"width"`
+	Width Numeric `json:"width"`
 	// The source URL of the image.
 	URL string `json:"url"`
 }
@@ -143,6 +148,9 @@ type Error struct {
 	Message string `json:"message"`
 	// The HTTP status code.
 	Status int `json:"status"`
+	// RetryAfter contains the time before which client should not retry a
+	// rate-limited request, calculated from the Retry-After header, when present.
+	RetryAfter time.Time `json:"-"`
 }
 
 func (e Error) Error() string {
@@ -150,10 +158,21 @@ func (e Error) Error() string {
 }
 
 // decodeError decodes an Error from an io.Reader.
-func (c *Client) decodeError(resp *http.Response) error {
-	responseBody, err := ioutil.ReadAll(resp.Body)
+func decodeError(resp *http.Response) error {
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+	if ctHeader := resp.Header.Get("Content-Type"); ctHeader == "" {
+		msg := string(responseBody)
+		if len(msg) == 0 {
+			msg = http.StatusText(resp.StatusCode)
+		}
+
+		return Error{
+			Message: msg,
+			Status:  resp.StatusCode,
+		}
 	}
 
 	if len(responseBody) == 0 {
@@ -179,6 +198,9 @@ func (c *Client) decodeError(resp *http.Response) error {
 
 		e.E.Message = fmt.Sprintf("spotify: unexpected HTTP %d: %s (empty error)",
 			resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	if retryAfter, _ := strconv.Atoi(resp.Header.Get("Retry-After")); retryAfter != 0 {
+		e.E.RetryAfter = time.Now().Add(time.Duration(retryAfter) * time.Second)
 	}
 
 	return e.E
@@ -222,7 +244,7 @@ func (c *Client) execute(req *http.Request, result interface{}, needsStatus ...i
 				// If the context is cancelled, return the original error
 			case <-time.After(retryDuration(resp)):
 				continue
-                        }
+			}
 		}
 		if resp.StatusCode == http.StatusNoContent {
 			return nil
@@ -230,7 +252,7 @@ func (c *Client) execute(req *http.Request, result interface{}, needsStatus ...i
 		if (resp.StatusCode >= 300 ||
 			resp.StatusCode < 200) &&
 			isFailure(resp.StatusCode, needsStatus) {
-			return c.decodeError(resp)
+			return decodeError(resp)
 		}
 
 		if result != nil {
@@ -271,7 +293,7 @@ func (c *Client) get(ctx context.Context, url string, result interface{}) error 
 
 		defer resp.Body.Close()
 
-		if resp.StatusCode == rateLimitExceededStatusCode && c.autoRetry {
+		if resp.StatusCode == http.StatusTooManyRequests && c.autoRetry {
 			select {
 			case <-ctx.Done():
 				// If the context is cancelled, return the original error
@@ -283,18 +305,11 @@ func (c *Client) get(ctx context.Context, url string, result interface{}) error 
 			return nil
 		}
 		if resp.StatusCode != http.StatusOK {
-			return c.decodeError(resp)
+			return decodeError(resp)
 		}
 
-		err = json.NewDecoder(resp.Body).Decode(result)
-		if err != nil {
-			return err
-		}
-
-		break
+		return json.NewDecoder(resp.Body).Decode(result)
 	}
-
-	return nil
 }
 
 // NewReleases gets a list of new album releases featured in Spotify.

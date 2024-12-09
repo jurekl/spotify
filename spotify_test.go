@@ -2,14 +2,17 @@ package spotify
 
 import (
 	"context"
-	"golang.org/x/oauth2"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 func testClient(code int, body io.Reader, validators ...func(*http.Request)) (*Client, *httptest.Server) {
@@ -70,7 +73,7 @@ func TestNewReleasesRateLimitExceeded(t *testing.T) {
 		// first attempt fails
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "2")
-			w.WriteHeader(rateLimitExceededStatusCode)
+			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = io.WriteString(w, `{ "error": { "message": "slow down", "status": 429 } }`)
 		}),
 		// next attempt succeeds
@@ -101,6 +104,52 @@ func TestNewReleasesRateLimitExceeded(t *testing.T) {
 	}
 	if releases.Albums[0].ID != "60mvULtYiNSRmpVvoa3RE4" {
 		t.Error("Invalid data:", releases.Albums[0].ID)
+	}
+}
+
+func TestRateLimitExceededReportsRetryAfter(t *testing.T) {
+	t.Parallel()
+	const retryAfter = 2
+
+	handlers := []http.HandlerFunc{
+		// first attempt fails
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+			w.WriteHeader(rateLimitExceededStatusCode)
+			_, _ = io.WriteString(w, `{ "error": { "message": "slow down", "status": 429 } }`)
+		}),
+		// next attempt succeeds
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			f, err := os.Open("test_data/new_releases.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			_, err = io.Copy(w, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}),
+	}
+
+	i := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers[i](w, r)
+		i++
+	}))
+	defer server.Close()
+
+	client := &Client{http: http.DefaultClient, baseURL: server.URL + "/"}
+	_, err := client.NewReleases(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var spotifyError Error
+	if !errors.As(err, &spotifyError) {
+		t.Fatalf("expected a spotify error, got %T", err)
+	}
+	if retryAfter*time.Second-time.Until(spotifyError.RetryAfter) > time.Second {
+		t.Error("expected RetryAfter value")
 	}
 }
 
@@ -144,14 +193,14 @@ func TestClient_Token(t *testing.T) {
 
 	t.Run("non oauth2 transport", func(t *testing.T) {
 		client := &Client{
-			http:    http.DefaultClient,
+			http: http.DefaultClient,
 		}
 		_, err := client.Token()
 		if err == nil || err.Error() != "spotify: client not backed by oauth2 transport" {
 			t.Errorf("Should throw error: %s", "spotify: client not backed by oauth2 transport")
 		}
 	})
-	
+
 	t.Run("invalid token", func(t *testing.T) {
 		httpClient := config.Client(context.Background(), nil)
 		client := New(httpClient)
@@ -160,4 +209,20 @@ func TestClient_Token(t *testing.T) {
 			t.Errorf("Should throw error: %s", "oauth2: token expired and refresh token is not set")
 		}
 	})
+}
+
+func TestDecode429Error(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"2"}},
+		Body:       io.NopCloser(strings.NewReader(`Too many requests`)),
+	}
+
+	err := decodeError(resp)
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+	if err.Error() != "Too many requests" {
+		t.Error("Invalid error message:", err.Error())
+	}
 }

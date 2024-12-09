@@ -5,9 +5,11 @@ import (
 	"fmt"
 )
 
-// AudioAnalysis contains a detailed audio analysis for a single track
-// identified by its unique Spotify ID. See:
-// https://developer.spotify.com/web-api/get-audio-analysis/
+// AudioAnalysis contains a [detailed audio analysis] for a single track
+// identified by its unique [Spotify ID].
+//
+// [detailed audio analysis]: https://developer.spotify.com/documentation/web-api/reference/get-audio-analysis
+// [Spotify ID]: https://developer.spotify.com/documentation/web-api/#spotify-uris-and-ids
 type AudioAnalysis struct {
 	Bars     []Marker      `json:"bars"`
 	Beats    []Marker      `json:"beats"`
@@ -49,7 +51,7 @@ type Section struct {
 	KeyConfidence           float64 `json:"key_confidence"`
 	Mode                    Mode    `json:"mode"`
 	ModeConfidence          float64 `json:"mode_confidence"`
-	TimeSignature           int     `json:"time_signature"`
+	TimeSignature           Numeric `json:"time_signature"`
 	TimeSignatureConfidence float64 `json:"time_signature_confidence"`
 }
 
@@ -70,16 +72,16 @@ type AnalysisTrack struct {
 	NumSamples              int64   `json:"num_samples"`
 	Duration                float64 `json:"duration"`
 	SampleMD5               string  `json:"sample_md5"`
-	OffsetSeconds           int     `json:"offset_seconds"`
-	WindowSeconds           int     `json:"window_seconds"`
+	OffsetSeconds           Numeric `json:"offset_seconds"`
+	WindowSeconds           Numeric `json:"window_seconds"`
 	AnalysisSampleRate      int64   `json:"analysis_sample_rate"`
-	AnalysisChannels        int     `json:"analysis_channels"`
+	AnalysisChannels        Numeric `json:"analysis_channels"`
 	EndOfFadeIn             float64 `json:"end_of_fade_in"`
 	StartOfFadeOut          float64 `json:"start_of_fade_out"`
 	Loudness                float64 `json:"loudness"`
 	Tempo                   float64 `json:"tempo"`
 	TempoConfidence         float64 `json:"tempo_confidence"`
-	TimeSignature           int     `json:"time_signature"`
+	TimeSignature           Numeric `json:"time_signature"`
 	TimeSignatureConfidence float64 `json:"time_signature_confidence"`
 	Key                     Key     `json:"key"`
 	KeyConfidence           float64 `json:"key_confidence"`
@@ -95,8 +97,10 @@ type AnalysisTrack struct {
 	RhythmVersion           float64 `json:"rhythm_version"`
 }
 
-// GetAudioAnalysis queries the Spotify web API for an audio analysis of a
+// GetAudioAnalysis queries the Spotify web API for an [audio analysis] of a
 // single track.
+//
+// [audio analysis]: https://developer.spotify.com/documentation/web-api/reference/get-audio-analysis
 func (c *Client) GetAudioAnalysis(ctx context.Context, id ID) (*AudioAnalysis, error) {
 	url := fmt.Sprintf("%saudio-analysis/%s", c.baseURL, id)
 
